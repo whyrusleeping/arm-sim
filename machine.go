@@ -6,10 +6,10 @@ import (
 
 type Machine struct {
 	srcp *Parser
-	regs []int
-	mem []uint32
-	jumps []int
-	datalabels []int
+	regs []int32
+	mem []int32
+	jumps []int32
+	datalabels []int32
 	instr []*Instruction
 	c_Z bool
 	c_N bool
@@ -20,28 +20,26 @@ type Machine struct {
 
 func NewMachine() *Machine {
 	m := new(Machine)
-	m.regs = make([]int, len(registers))
-	m.jumps = make([]int,1024)
-	m.mem = make([]uint32, 8192)
+	m.regs = make([]int32, len(registers))
+	m.jumps = make([]int32,1024)
+	m.mem = make([]int32, 8192)
 	m.regs[Rsp] = 1024
-	m.verbose = false
-	m.super = false
 	return m
 }
 
-func (m *Machine) askVal(v *Val) int {
+func (m *Machine) askVal(v *Val) int32 {
 	if v.reg == -1 {
 		return v.offs
 	}
-	return m.regs[v.reg] + v.offs
+	return int32(m.regs[v.reg]) + v.offs
 }
 
-func (m *Machine) setDataLabel(loc int) int {
+func (m *Machine) setDataLabel(loc int32) int {
 	m.datalabels = append(m.datalabels, loc)
 	return len(m.datalabels) - 1
 }
 
-func (m *Machine) setMem(addr, bytes, val int) {
+func (m *Machine) setMem(addr, bytes int32, val int32) {
 	word := addr / 4
 	b    := uint(addr % 4)
 	//fmt.Printf("Mem write at %d\n", addr)
@@ -55,18 +53,18 @@ func (m *Machine) setMem(addr, bytes, val int) {
 				panic("oh god.")
 				return
 			}
-			m.mem[word] = uint32(val)
+			m.mem[word] = int32(val)
 		case 1:
 			blnk := m.mem[word] & ^(0xff << (8*b))
-			blnk |= uint32(byte(val)) << (8*b)
+			blnk |= int32(byte(val)) << (8*b)
 			m.mem[word] = blnk
 		default:
 			panic("I DONT KNOW WHAT TO DO")
 	}
 }
-func (m *Machine) memAccess(addr, bytes int) int {
+func (m *Machine) memAccess(addr, bytes int32) int32 {
 	word := addr / 4
-	b    := uint32(addr % 4)
+	b    := int32(addr % 4)
 	if m.verbose {
 		fmt.Printf("Mem access at: %d [%d]\n", word, b)
 	}
@@ -75,16 +73,16 @@ func (m *Machine) memAccess(addr, bytes int) int {
 		case 4:
 			if b != 0 {
 				fmt.Printf("error in memory access! pc = %d\n", m.regs[Rpc])
-				return -1
+				return 0
 			}
-			return int(m.mem[word])
+			return m.mem[word]
 		case 1:
 			v := m.mem[word]
-			return int((v & (0xff << (b*8))) >> (b*8))
+			return (v & (0xff << uint32(b*8))) >> uint32(b*8)
 		default:
 			panic("I DONT KNOW WHAT TO DO")
 	}
-	return -1
+	return 0
 }
 
 func (m *Machine) Run(main int) error {
@@ -92,20 +90,20 @@ func (m *Machine) Run(main int) error {
 	fmt.Printf("Starting at: %d\n", m.jumps[main])
 	fmt.Println("## Begin Program Execution ##")
 	m.regs[Rlr] = 8192
-	for ;m.regs[Rpc] < len(m.instr); m.regs[Rpc]++ {
+	for ;m.regs[Rpc] < int32(len(m.instr)); m.regs[Rpc]++ {
 		m.Exec(m.instr[m.regs[Rpc]])
 	}
 	return nil
 }
 
-func (m *Machine) store(v int, in *Val) {
+func (m *Machine) store(v int32, in *Val) {
 	//fmt.Printf("Storing in register: %d\n", in.reg)
-	m.regs[in.reg] = v
+	m.regs[in.reg] = int32(v)
 }
 
 func (m *Machine) addInstruction(i *Instruction) {
 	if i.op == Ilabel {
-		m.jumps[i.params[0].reg] = len(m.instr)
+		m.jumps[i.params[0].reg] = int32(len(m.instr))
 		return
 	}
 	m.instr = append(m.instr, i)
@@ -133,8 +131,8 @@ type Instruction struct {
 
 type Val struct {
 	reg int
-	offs int
-	shift int
+	offs int32
+	shift int32
 }
 
 func (m *Machine) Exec(i *Instruction) {
@@ -144,12 +142,12 @@ func (m *Machine) Exec(i *Instruction) {
 	if m.super {
 		fmt.Println("Registers:")
 		for i := 0; i < len(registers); i++ {
-			fmt.Printf("%s = %d\n", registers[i], m.regs[i])
+			fmt.Printf("%s = %d [%x]\n", registers[i], m.regs[i], m.regs[i])
 		}
 		fmt.Println("Stack:")
 		start := m.regs[Rsp]
-		for i := 32; i >= -12; i -= 4 {
-			fmt.Printf("%d: %d", start + i, m.mem[(start + i)/4])
+		for i := int32(32); i >= -12; i -= 4 {
+			fmt.Printf("%d: %d", int32(start) + i, m.mem[(int32(start) + i)/4])
 			if i == 0 {
 				fmt.Printf(" <-sp")
 			}
@@ -173,15 +171,20 @@ func (m *Machine) Exec(i *Instruction) {
 		loc := m.askVal(i.params[1])
 		v := m.askVal(i.params[0])
 		//fmt.Printf("storing %d in memory location %d\n", v,loc)
-		m.setMem(loc, 4, v)
+		m.setMem(int32(loc), 4, v)
 	case Imov:
 		v := m.askVal(i.params[1])
+		if i.params[1].shift < 0 {
+			v = v >> uint32(i.params[1].shift * -1)
+		} else if i.params[1].shift > 0 {
+			v = v << uint32(i.params[1].shift)
+		}
 		//fmt.Printf("putting %d in %d\n", v, i.params[0].reg)
-		m.regs[i.params[0].reg] = v
+		m.regs[i.params[0].reg] = int32(v)
 	case Ildr:
 		v := m.memAccess(m.askVal(i.params[1]), 4)
 		//fmt.Printf("Loading %d into reg %d\n", v, i.params[0].reg)
-		m.regs[i.params[0].reg] = v
+		m.regs[i.params[0].reg] = int32(v)
 	case Ibl:
 		//fmt.Printf("Jumping to point: %d\n", i.params[0].reg)
 		if i.params[0].reg < 0 {
@@ -261,17 +264,17 @@ func (m *Machine) Exec(i *Instruction) {
 		cv = cv & ^0xffff
 		m.regs[i.params[0].reg] = cv | i.params[1].offs
 	case Imovt:
-		cv := m.regs[i.params[0].reg]
+		cv := uint32(m.regs[i.params[0].reg])
 		cv = cv & 0xffff
-		m.regs[i.params[0].reg] = cv | i.params[1].offs << 16
+		m.regs[i.params[0].reg] = int32(cv | uint32(i.params[1].offs) << 16)
 	case Ismull:
 		m1 := int64(m.askVal(i.params[2]))
 		m2 := int64(m.askVal(i.params[3]))
 		res := m1 * m2
-		outl := res & 0xffffffff
-		outh := res >> 32
-		m.regs[i.params[0].reg] = int(outh)
-		m.regs[i.params[1].reg] = int(outl)
+		outl := int32(res & 0xffffffff)
+		outh := int32(res >> 32)
+		m.regs[i.params[0].reg] = outl
+		m.regs[i.params[1].reg] = outh
 	case Irsb:
 		m.regs[i.params[0].reg] = m.askVal(i.params[2]) - m.askVal(i.params[1])
 
@@ -281,5 +284,6 @@ func (m *Machine) Exec(i *Instruction) {
 }
 
 func (m *Machine) Mputchar(i *Instruction) {
+	//fmt.Println(m.regs[0])
 	fmt.Printf("%c", m.regs[0])
 }

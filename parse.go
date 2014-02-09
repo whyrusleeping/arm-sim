@@ -73,37 +73,6 @@ func first(s string) string {
 	return s
 }
 
-func (p *Parser) strToVal(s string) *Val {
-	v := new(Val)
-	var err error
-	if s[0] == '#' {
-		v.offs,err = strconv.Atoi(s[1:])
-		if err != nil {
-			panic(err)
-		}
-		return v
-	}
-	if s[0] == '[' {
-		vals := strings.Split(s[1:len(s)-1], ",")
-		reg,ok := p.regtab[vals[0]]
-		if !ok {
-			reg = -1
-		}
-		v.reg = reg
-		v.offs,err = strconv.Atoi(strings.TrimLeft(vals[1], " ")[1:])
-		if err != nil {
-			panic(err)
-		}
-		return v
-	}
-	reg,ok := p.regtab[s]
-	if !ok {
-		reg = -1
-	}
-	v.reg = reg
-	return v
-}
-
 func (p *Parser) regValue(s string) int {
 	if s[len(s)-1] == '!' {
 		if p.verbose {
@@ -119,7 +88,7 @@ func (p *Parser) regValue(s string) int {
 	return reg
 }
 
-func (p *Parser) ParseImmediate(s string) int {
+func (p *Parser) ParseImmediate(s string) int32 {
 	s = strings.Trim(s," ")
 	if s[0] == '#' {
 		s = s[1:]
@@ -135,11 +104,11 @@ func (p *Parser) ParseImmediate(s string) int {
 			di := p.dattab[vs[2]]
 			v := p.target.datalabels[di]
 			v = v & 0xffff
-			return v
+			return int32(v)
 		case "upper16":
 			v := p.target.datalabels[p.dattab[vs[2]]]
 			v = v >> 16
-			return v
+			return int32(v)
 		default:
 			fmt.Println(s)
 			panic("INVALID!")
@@ -151,7 +120,7 @@ func (p *Parser) ParseImmediate(s string) int {
 			panic(err)
 		}
 		fmt.Printf("Immediate: %d\n", n)
-		return n
+		return int32(n)
 	}
 }
 
@@ -320,7 +289,7 @@ type Parser struct {
 	dattab map[string]int
 	mode int
 	target *Machine
-	memloc int
+	memloc int32
 	verbose bool
 }
 
@@ -424,7 +393,7 @@ func (p *Parser) ParseInstruction(ss string) *Instruction {
 		fmt.Printf("String: '%s'\n", str)
 
 		for _,v := range str {
-			p.target.setMem(p.memloc, 1, int(v))
+			p.target.setMem(p.memloc, 1, int32(v))
 			p.memloc++
 		}
 		return nil
@@ -479,6 +448,10 @@ func main() {
 	buf := bufio.NewScanner(in)
 	m := NewMachine()
 	p := NewParser()
+	if len(os.Args) > 1 {
+		m.verbose = true
+		m.super = true
+	}
 	p.target = m
 	m.srcp = p
 	for buf.Scan() {
