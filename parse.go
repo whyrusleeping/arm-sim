@@ -39,10 +39,9 @@ const (
 	Mdata
 )
 
-var registers []string = []string{
+var registers = []string{
 	"r0","r1","r2","r3","r4","r5","r6","r7","r8","r9","r10","r11","r12",
-	"sp","lr","pc","apsr"
-}
+	"sp","lr","pc","apsr"}
 
 const (
 	Rr0 = iota
@@ -106,6 +105,12 @@ func (p *Parser) strToVal(s string) *Val {
 }
 
 func (p *Parser) regValue(s string) int {
+	if s[len(s)-1] == '!' {
+		if p.verbose {
+			fmt.Println("Mod In Place Reg.")
+		}
+		s = s[:len(s)-1]
+	}
 	reg,ok := p.regtab[s]
 	if !ok {
 		fmt.Printf("Invalid register: '%s'\n", s)
@@ -115,7 +120,11 @@ func (p *Parser) regValue(s string) int {
 }
 
 func (p *Parser) ParseImmediate(s string) int {
-	if s[1] == ':' {
+	s = strings.Trim(s," ")
+	if s[0] == '#' {
+		s = s[1:]
+	}
+	if s[0] == ':' {
 		vs := strings.Split(s,":")
 		if len(vs) < 3 {
 			fmt.Println(s)
@@ -137,37 +146,54 @@ func (p *Parser) ParseImmediate(s string) int {
 		}
 		return -1
 	} else {
-		n,err := strconv.Atoi(s[1:])
+		n,err := strconv.Atoi(s)
 		if err != nil {
 			panic(err)
 		}
+		fmt.Printf("Immediate: %d\n", n)
 		return n
 	}
 }
 
-func (p *Parser) parseValue(s string) *Val {
+func (p *Parser) parseValue(s string) []*Val {
+	s = strings.Trim(s, " ")
+	if p.verbose {
+		fmt.Printf("Parsing: '%s'\n",s)
+	}
 	v := new(Val)
-	if s[0] == '#' {
+	if s[0] == '#' || isNum(s[0]) {
+		v.reg = -1
 		v.offs = p.ParseImmediate(s)
-		return v
-	}
-	if s[0] == '[' {
+	} else if s[0] == '[' {
 		ops := strings.Split(s[1:len(s)-1], ",")
+		v.reg = p.regValue(ops[0])
+		if len(ops) > 1 {
+			v.offs = p.ParseImmediate(ops[1])
+		}
+	} else if s[0] == '{' {
+		vals := []*Val{}
+		regs := strings.Split(s[1:len(s)-1], ",")
+		for _,r := range regs {
+			vals = append(vals, p.parseValue(r)...)
+		}
+		return vals
+	} else {
+		v.reg = p.regValue(s)
 	}
-	return nil
+	return []*Val{v}
 }
 
 func readToken(b *bytes.Buffer) string {
 	out := new(bytes.Buffer)
 	in := false
-	for buf.Len() > 0 {
-		b,_ := buf.ReadByte()
+	for b.Len() > 0 {
+		b,_ := b.ReadByte()
 		if in {
 			if b == ']' || b == '}' {
-				return out.String()
-			} else {
 				out.WriteByte(b)
+				return out.String()
 			}
+			out.WriteByte(b)
 			continue
 		}
 		switch b {
@@ -187,13 +213,37 @@ func readToken(b *bytes.Buffer) string {
 
 func (p *Parser) parseArgsAlt(s string) ([]*Val, error) {
 	var vals []*Val
+	var toks []string
 	buf := bytes.NewBufferString(s)
 	for buf.Len() > 0 {
-		vals = append(vals, p.parseValue(readToken(buf)))
+		toks = append(toks, readToken(buf))
+	}
+	for i := 0; i < len(toks); i++ {
+		if len(toks) > i + 1 {
+			switch toks[i+1] {
+				case "asr":
+					c := p.ParseImmediate(toks[i+2])
+					reg := p.parseValue(toks[i])[0]
+					reg.shift = -1 * c
+					vals = append(vals, reg)
+					i += 2
+					continue
+				case "asl":
+					c := p.ParseImmediate(toks[i+2])
+					reg := p.parseValue(toks[i])[0]
+					reg.shift = c
+					vals = append(vals, reg)
+					i += 2
+					continue
+			}
+		}
+		v := p.parseValue(toks[i])
+		vals = append(vals, v...)
 	}
 	return vals,nil
 }
 
+/*
 func (p *Parser) parseArgs(s string) ([]*Val,error) {
 	var vals []*Val
 	buf := bytes.NewBufferString(s)
@@ -261,6 +311,7 @@ func (p *Parser) parseArgs(s string) ([]*Val,error) {
 	}
 	return nil,nil
 }
+*/
 
 type Parser struct {
 	instab map[string]int
@@ -270,6 +321,7 @@ type Parser struct {
 	mode int
 	target *Machine
 	memloc int
+	verbose bool
 }
 
 func NewParser() *Parser {
@@ -313,6 +365,10 @@ func NewParser() *Parser {
 	return p
 }
 
+func isNum(b byte) bool {
+	return b >= '0' && b <= '9'
+}
+
 func (p *Parser) jumpMap(s string) int {
 	i,ok := p.jmptab[s]
 	if !ok {
@@ -335,24 +391,29 @@ func (p *Parser) ParseInstruction(ss string) *Instruction {
 	switch instr {
 	case ".text":
 		p.mode = Mtext
-		fmt.Println("Reading text data.")
+		if p.verbose {
+			fmt.Println("Reading text data.")
+		}
 		return nil
 	case ".section":
 		arg := strings.Split(ss," ")
-		fmt.Println(len(arg))
 		if len(arg) > 1 {
 			param := strings.Trim(arg[1]," ")
 			switch param {
 			case ".rodata":
 				p.mode = Mdata
-				fmt.Println("Reading data.")
+				if p.verbose {
+					fmt.Println("Reading data.")
+				}
 			default:
 				fmt.Printf("Unknown mode: %s\n", param)
 			}
 		}
 		return nil
 	case ".arch",".global":
-		fmt.Println(ss)
+		if p.verbose {
+			fmt.Println(ss)
+		}
 		return nil
 	case ".fpu",".file",".eabi_attribute",".ident",".align":
 		return nil
@@ -374,10 +435,11 @@ func (p *Parser) ParseInstruction(ss string) *Instruction {
 	}
 	ins := new(Instruction)
 	if instr[len(instr)-1] == ':' {
-		//fmt.Println("Found label.")
 		if p.mode == Mdata {
 			l := instr[:len(instr)-1]
-			fmt.Printf("Setting label '%s'\n", l)
+			if p.verbose {
+				fmt.Printf("Setting label '%s'\n", l)
+			}
 			p.dattab[l] = p.target.setDataLabel(p.memloc)
 			return nil
 		} else if p.mode == Mtext {
@@ -400,7 +462,7 @@ func (p *Parser) ParseInstruction(ss string) *Instruction {
 		return ins
 	}
 
-	ins.params,err = p.parseArgs(strings.TrimLeft(ss[len(instr):], " \t"))
+	ins.params,err = p.parseArgsAlt(strings.TrimLeft(ss[len(instr):], " \t"))
 	if err != nil {
 		fmt.Println(ss)
 		panic(err)

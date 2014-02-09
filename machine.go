@@ -15,6 +15,7 @@ type Machine struct {
 	c_N bool
 	c_V bool
 	verbose bool
+	super bool
 }
 
 func NewMachine() *Machine {
@@ -24,6 +25,7 @@ func NewMachine() *Machine {
 	m.mem = make([]uint32, 8192)
 	m.regs[Rsp] = 1024
 	m.verbose = false
+	m.super = false
 	return m
 }
 
@@ -65,7 +67,9 @@ func (m *Machine) setMem(addr, bytes, val int) {
 func (m *Machine) memAccess(addr, bytes int) int {
 	word := addr / 4
 	b    := uint32(addr % 4)
-	//fmt.Printf("Mem access at: %d\n", addr)
+	if m.verbose {
+		fmt.Printf("Mem access at: %d [%d]\n", word, b)
+	}
 
 	switch bytes {
 		case 4:
@@ -73,7 +77,6 @@ func (m *Machine) memAccess(addr, bytes int) int {
 				fmt.Printf("error in memory access! pc = %d\n", m.regs[Rpc])
 				return -1
 			}
-			//fmt.Printf("Accessing memory at: %d\n", word)
 			return int(m.mem[word])
 		case 1:
 			v := m.mem[word]
@@ -90,9 +93,6 @@ func (m *Machine) Run(main int) error {
 	fmt.Println("## Begin Program Execution ##")
 	m.regs[Rlr] = 8192
 	for ;m.regs[Rpc] < len(m.instr); m.regs[Rpc]++ {
-		if m.verbose {
-			fmt.Printf("pc = %d\n", m.regs[Rpc])
-		}
 		m.Exec(m.instr[m.regs[Rpc]])
 	}
 	return nil
@@ -139,7 +139,24 @@ type Val struct {
 
 func (m *Machine) Exec(i *Instruction) {
 	if m.verbose {
-		fmt.Printf("instr: %s nargs: %d\n", m.srcp.getInsName(i.op), len(i.params))
+		fmt.Printf("pc = %d instr: %s nargs: %d\n", m.regs[Rpc], m.srcp.getInsName(i.op), len(i.params))
+	}
+	if m.super {
+		fmt.Println("Registers:")
+		for i := 0; i < len(registers); i++ {
+			fmt.Printf("%s = %d\n", registers[i], m.regs[i])
+		}
+		fmt.Println("Stack:")
+		start := m.regs[Rsp]
+		for i := 32; i >= -12; i -= 4 {
+			fmt.Printf("%d: %d", start + i, m.mem[(start + i)/4])
+			if i == 0 {
+				fmt.Printf(" <-sp")
+			}
+			fmt.Println()
+		}
+		var s string
+		fmt.Scanln(&s)
 	}
 	switch i.op {
 	case Iadd:
@@ -148,7 +165,10 @@ func (m *Machine) Exec(i *Instruction) {
 		//fmt.Printf("Adding %d and %d\n", a,b)
 		m.store(a + b, i.params[0])
 	case Isub:
-		m.store(m.askVal(i.params[1]) - m.askVal(i.params[2]), i.params[0])
+		a := m.askVal(i.params[1])
+		b := m.askVal(i.params[2])
+		//fmt.Printf("Subtracting %d from %d\n", b, a)
+		m.store(a - b, i.params[0])
 	case Istr:
 		loc := m.askVal(i.params[1])
 		v := m.askVal(i.params[0])

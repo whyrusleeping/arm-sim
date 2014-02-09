@@ -40,37 +40,6 @@ prints:
 	@ sp needed
 	ldmfd	sp!, {fp, pc}
 	.size	prints, .-prints
-	.align	2
-	.global	printd
-	.type	printd, %function
-printd:
-	@ args = 0, pretend = 0, frame = 8
-	@ frame_needed = 1, uses_anonymous_args = 0
-	stmfd	sp!, {fp, lr}
-	add	fp, sp, #4
-	sub	sp, sp, #8
-	str	r0, [fp, #-8]
-	ldr	r3, [fp, #-8]
-	cmp	r3, #0
-	bne	.L5
-	mov	r0, #48
-	bl	putc
-	b	.L4
-.L5:
-	ldr	r2, [fp, #-8]
-	movw	r3, #26215
-	movt	r3, 26214
-	smull	r1, r3, r3, r2
-	mov	r1, r3, asr #2
-	mov	r3, r2, asr #31
-	rsb	r3, r3, r1
-	mov	r0, r3
-	bl	printd
-.L4:
-	sub	sp, fp, #4
-	@ sp needed
-	ldmfd	sp!, {fp, pc}
-	.size	printd, .-printd
 	.section	.rodata
 	.align	2
 .LC0:
@@ -87,9 +56,6 @@ main:
 	movw	r0, #:lower16:.LC0
 	movt	r0, #:upper16:.LC0
 	bl	prints
-	movw	r0, #39784
-	movt	r0, 1
-	bl	printd
 	ldmfd	sp!, {fp, pc}
 	.size	main, .-main
 	.ident	"GCC: (GNU) 4.8.2 20131219 (prerelease)"
